@@ -1,0 +1,109 @@
+---
+title: "Mixed Model Effect Analysis"
+author: "Feifan Cao"
+date: "4/29/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Library
+
+```{r}
+library(rstanarm)
+library(lme4)
+library(ggplot2)
+library(dplyr)
+```
+
+## Read in the file
+
+```{r}
+combined_results <- readRDS("cut_from_shuffling_with_participant_id.RDS")
+head(combined_results)
+```
+
+
+## Mixed Model Effect
+
+Mixed effect logistic model on shuffler is defined:
+log(theta s / (1 - theta s)) = beta0 + alpha p(s). where alpha is independent from Normal distribution with (0, square(tau))
+
+```{r}
+# mixed effect model
+model_a <- glmer(
+  cbind(top_half_number, 52 - top_half_number) ~ (1|shuffler),
+  data = combined_results,
+  family = binomial(link = "logit")
+)
+summary(model_a)
+```
+
+
+```{r}
+# Analyze on the Mixed Effect Model
+
+# Inverse of the logit link
+expit <- function(b) {1/(1+exp(-b))}
+
+# If beta0 = 0
+expit(0)
+
+# Estiamte for beta0 (Intercept)
+beta0 <- model_a@beta
+beta0
+
+# Estiamte for probability of success
+# for the average person
+expit(model_a@beta)
+
+# CI for model beta0 (Intercept)
+confint(model_a)[2,]
+
+# CI for probability of success
+# for the "average" person
+expit(confint(model_a)[2,])
+
+
+# Point estimate for random effect standard deviation
+summary(model_a)$varcor
+
+# CI for random effect standard deviation
+confint(model_a)[1,]
+
+# Estimated values for random effects
+model_a_result <- ranef(model_a)
+shuffler_name <- rownames(model_a_result$shuffler)
+prob_shuffler <- expit(beta0+model_a_result$shuffler[, "(Intercept)"])
+prob_shuffler_result <- cbind(shuffler_name, prob_shuffler)
+
+#Plot of cards on top pile
+ggplot(data.frame(
+  id   = 1:length(prob_shuffler),
+  prob = prob_shuffler),
+  aes( 
+    x = id,
+    y = prob)) + 
+  geom_point() +
+  geom_hline(
+    yintercept = 0.5,
+    color = 'red'
+  ) +
+  ggtitle('Estimated probability of a card being on the top pile for each shuffler')+
+  labs(y = 'Probability', x = 'Shuffler')
+
+# Plot for each Participant
+ggplot(combined_results, aes(x = top_half_number, y = after_stat(density), color = shuffler)) +
+  # geom_histogram(binwidth = 1, color = "white") +
+  geom_point(data = data.frame(num_on_top = 0:52) %>% 
+               mutate(pmf = dbinom(num_on_top, 52, 0.5)),
+             aes(x = num_on_top, y = pmf), color = "red") +
+  geom_density() +
+  scale_color_discrete(name = "Shuffler") +
+  labs(y= "Proportion of Shuffles", x = "Number of Cards in Top Cuts") +
+  ggtitle('Empirical Proportion of Each Participant vs. Binomial Distribution')
+
+```
+
